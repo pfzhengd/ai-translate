@@ -1,9 +1,9 @@
 import { callAI, cleanAIResponse } from './ai-request'
 import { getPrompt } from './prompt'
 import { buildFileTasks, readJsonFile, writeJsonFile, FileTask } from './io-handler'
+import { printHelp, printVersion } from './cli'
 
-function parseArgs () {
-  const args = process.argv.slice(2)
+function parseArgs (args) {
   const params: Record<string, string | boolean> = {}
   for (const arg of args) {
     if (!arg.startsWith('--')) continue
@@ -73,21 +73,32 @@ async function runTask (task: FileTask, cfg: any) {
 }
 
 export async function main () {
-  const args = parseArgs()
+  const args = process.argv.slice(2)
+
+  if (args.includes('-v') || args.includes('--version')) {
+    printVersion()
+    return
+  }
+
+  if (args.includes('-h') || args.includes('--help')) {
+    return printHelp()
+  }
+
+  const arg = parseArgs(args)
   const apiKey =
-    (args.apiKey as string) ||
-    (args.OPENROUTER_API_KEY as string) ||
+    (arg.apiKey as string) ||
+    (arg.OPENROUTER_API_KEY as string) ||
     process.env.OPENROUTER_API_KEY ||
     ''
   const apiUrl =
-    (args.apiUrl as string) ||
+    (arg.apiUrl as string) ||
     process.env.OPENROUTER_API_URL ||
     'https://openrouter.ai/api/v1/chat/completions'
-  const model = (args.model as string) || 'gpt-4o-mini'
-  const concurrency = Number(args.concurrency ?? 2)
-  const retry = Number(args.retry ?? 1)
-  const dry = Boolean(args.dry ?? false)
-  const timeoutMs = Number(args.timeout ?? 60000)
+  const model = (arg.model as string) || 'gpt-4o-mini'
+  const concurrency = Number(arg.concurrency ?? 2)
+  const retry = Number(arg.retry ?? 1)
+  const dry = Boolean(arg.dry ?? false)
+  const timeoutMs = Number(arg.timeout ?? 60000)
 
   if (!apiKey) {
     console.error('❌ 缺少 OPENROUTER_API_KEY')
