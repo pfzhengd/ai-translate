@@ -35,7 +35,7 @@ export function printHelp () {
  */
 export function printVersion () {
   try {
-    const pkgPath = path.resolve(__dirname, '../package.json')
+    const pkgPath = path.resolve(__dirname, '../../package.json')
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
     console.log(`ait v${pkg.version}`)
   } catch {
