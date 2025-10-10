@@ -15,9 +15,28 @@ function getJsonFiles (dir: string): string[] {
   return fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort()
 }
 
+/** 深度合并对象（数组直接覆盖） */
+function deepMerge (target: any, source: any): any {
+  if (typeof target !== 'object' || target === null) return source
+  if (typeof source !== 'object' || source === null) return source
+
+  const result: any = Array.isArray(target) ? [...target] : { ...target }
+
+  for (const [key, value] of Object.entries(source)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      result[key] = deepMerge(result[key] ?? {}, value)
+    } else {
+      result[key] = value
+    }
+  }
+
+  return result
+}
+
 /** 读取 JSON（带错误上下文） */
 export function readJsonFile (filePath: string): any {
   try {
+    if (!fs.existsSync(filePath)) return {}
     const raw = fs.readFileSync(filePath, 'utf8')
     return JSON.parse(raw)
   } catch (e: any) {
@@ -25,12 +44,20 @@ export function readJsonFile (filePath: string): any {
   }
 }
 
-/** 写入 JSON（自动建目录，带错误上下文） */
+/** 写入 JSON（仅更新字段，不覆盖整个对象） */
 export function writeJsonFile (filePath: string, data: any): void {
   try {
     const dir = path.dirname(filePath)
     fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8')
+
+    // ✅ 如果目标文件存在，则读取旧数据并合并
+    let finalData = data
+    if (fs.existsSync(filePath)) {
+      const existing = readJsonFile(filePath)
+      finalData = deepMerge(existing, data)
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(finalData, null, 2), 'utf8')
   } catch (e: any) {
     throw new Error(`❌ 写入文件失败: ${filePath}\n${e?.message || e}`)
   }
@@ -77,5 +104,6 @@ export function buildFileTasks (
       tasks.push({ lang, file, pendingPath, targetPath, isNew })
     }
   }
+
   return tasks
 }
