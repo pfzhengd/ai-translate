@@ -1,3 +1,12 @@
+## [0.3.1](https://github.com/pfzhengd/ai-translate/compare/v0.3.0...v0.3.1) (2025-10-10)
+
+
+### Bug Fixes
+
+* 查看版本号不对 ([2c3b3ca](https://github.com/pfzhengd/ai-translate/commit/2c3b3ca3d36ee2a5b5eb2790c413b6f8944040d2))
+
+
+
 # [0.3.0](https://github.com/pfzhengd/ai-translate/compare/v0.2.1...v0.3.0) (2025-10-10)
 
 
