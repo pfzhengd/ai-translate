@@ -1,3 +1,12 @@
+# [0.3.0](https://github.com/pfzhengd/ai-translate/compare/v0.2.1...v0.3.0) (2025-10-10)
+
+
+### Features
+
+* 增加帮助命令 ([feea70a](https://github.com/pfzhengd/ai-translate/commit/feea70ab4f2e1a5396b0796c1054d31b6599bf2e))
+
+
+
 ## [0.2.1](https://github.com/pfzhengd/ai-translate/compare/v0.2.0...v0.2.1) (2025-10-10)
 
 
