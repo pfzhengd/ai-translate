@@ -18,7 +18,7 @@ ait 是一个基于 AI 模型的多语言 JSON 翻译 CLI 工具。
 
 📦 安装
 
-npm install -g @jupiter/translate
+npm install -g @jupiterjs/translate
 
 
 ⸻

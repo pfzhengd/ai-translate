@@ -1,5 +1,5 @@
 {
-  "name": "@jupiter/translate",
+  "name": "@jupiterjs/translate",
   "version": "0.1.0",
   "description": "ai翻译",
   "main": "lib/main/index.js",
