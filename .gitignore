@@ -13,4 +13,4 @@ locales/
 pending-langs/
 test/tmp_test_env/
 .env
-test_副本/
+test/
