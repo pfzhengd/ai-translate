@@ -1,3 +1,12 @@
+## [0.2.1](https://github.com/pfzhengd/ai-translate/compare/v0.2.0...v0.2.1) (2025-10-10)
+
+
+### Bug Fixes
+
+* 会完全覆盖旧文件 ([4f118ba](https://github.com/pfzhengd/ai-translate/commit/4f118ba75aeeffdc156e061ce52534b0d0bd04ce))
+
+
+
 # [0.2.0](https://github.com/pfzhengd/ai-translate/compare/v0.1.0...v0.2.0) (2025-10-10)
 
 
