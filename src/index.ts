@@ -46,27 +46,27 @@ function createLogger (mode: LogMode) {
 
   return {
     startTask: (taskId: string) =>
-      print({ time: nowISO(), taskId, step: 'start', status: 'info' }),
+      print({ time: nowISO(), taskId, step: '开始', status: 'info' }),
     callAI: (taskId: string, attempt: string) =>
-      print({ time: nowISO(), taskId, step: 'ai.call', status: 'info', attempt }),
+      print({ time: nowISO(), taskId, step: 'AI 翻译中。。。', status: 'info', attempt }),
     retryAI: (taskId: string, attempt: string, error: string) =>
-      print({ time: nowISO(), taskId, step: 'ai.retry', status: 'info', attempt, error }),
+      print({ time: nowISO(), taskId, step: 'AI 重试翻译中。。。', status: 'info', attempt, error }),
     aiError: (taskId: string, error: string) =>
-      print({ time: nowISO(), taskId, step: 'ai.error', status: 'fail', error }),
+      print({ time: nowISO(), taskId, step: 'AI 翻译失败', status: 'fail', error }),
     skipTask: (taskId: string, reason = 'cache.hit') =>
-      print({ time: nowISO(), taskId, step: 'skip', status: 'info', extra: { reason } }),
+      print({ time: nowISO(), taskId, step: '跳过', status: 'info', extra: { reason } }),
     writeOk: (taskId: string, durationMs: number, path: string) =>
-      print({ time: nowISO(), taskId, step: 'write', status: 'ok', durationMs, extra: { path } }),
+      print({ time: nowISO(), taskId, step: '写入成功', status: 'ok', durationMs, extra: { path } }),
     success: (taskId: string, durationMs: number) =>
-      print({ time: nowISO(), taskId, step: 'success', status: 'ok', durationMs }),
+      print({ time: nowISO(), taskId, step: '成功', status: 'ok', durationMs }),
     parseError: (taskId: string, err: string) =>
-      print({ time: nowISO(), taskId, step: 'parse.error', status: 'fail', error: err }),
+      print({ time: nowISO(), taskId, step: '解析失败', status: 'fail', error: err }),
     done: (taskId: string) =>
-      print({ time: nowISO(), taskId, step: 'done', status: 'info' }),
+      print({ time: nowISO(), taskId, step: '完成', status: 'info' }),
     summary: (ok: number, fail: number, durationMs: number, extra?: Record<string, unknown>) =>
       print({
         time: nowISO(),
-        step: 'summary',
+        step: '总结',
         status: fail > 0 ? 'fail' : 'ok',
         durationMs,
         extra: { ok, fail, ...extra }
