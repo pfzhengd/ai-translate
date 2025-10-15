@@ -1,94 +1,95 @@
 import fs from 'fs'
 import path from 'path'
 
-export interface CacheData {
-  [lang: string]: {
-    [file: string]: {
-      [keyPath: string]: string // 记录原始英文文本
-    }
-  }
+/** 读取 package.json 的 name，动态决定缓存路径 */
+function getCachePath (): string {
+  const root = process.cwd()
+  const pkgPath = path.join(root, 'package.json')
+  let pkgName = 'default'
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+    pkgName = pkg.name?.replace(/^@/, '').replace(/\//g, '-') || 'default'
+  } catch {}
+  return path.resolve(root, `node_modules/.cache/${pkgName}/cache.json`)
 }
 
-const CACHE_FILE = path.resolve(process.cwd(), '.ait-cache.json')
+function ensureDir (filePath: string) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+}
 
-export function loadCache (): CacheData {
+/** 加载缓存 */
+export function loadCache (): Record<string, any> {
+  const cachePath = getCachePath()
+  if (!fs.existsSync(cachePath)) return {}
   try {
-    if (!fs.existsSync(CACHE_FILE)) return {}
-    return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'))
+    return JSON.parse(fs.readFileSync(cachePath, 'utf8'))
   } catch {
     return {}
   }
 }
 
-export function saveCache (data: CacheData): void {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), 'utf8')
-  } catch (e) {
-    console.warn('⚠️ 写入缓存失败：', e)
+/** 保存缓存 */
+export function saveCache (cache: any) {
+  const cachePath = getCachePath()
+  ensureDir(cachePath)
+  fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf8')
+}
+
+/** 提取所有 key 的路径 */
+export function collectKeyPaths (obj: Record<string, any>, prefix = ''): string[] {
+  const result: string[] = []
+  for (const [key, val] of Object.entries(obj)) {
+    const full = prefix ? `${prefix}.${key}` : key
+    if (val && typeof val === 'object') {
+      result.push(...collectKeyPaths(val, full))
+    } else {
+      result.push(full)
+    }
   }
+  return result
 }
 
-/** 判断是否需要重新翻译 */
-export function shouldTranslate (
-  cache: CacheData,
-  lang: string,
-  file: string,
-  keyPath: string,
-  currentValue: any
-): boolean {
-  const oldValue = cache?.[lang]?.[file]?.[keyPath]
-  if (oldValue === undefined) return true // ✅ 从未翻译
-  return oldValue !== String(currentValue) // ✅ 值发生变化
-}
-
-/** 标记已翻译，并记录源值 */
+/** 根据 lang + file + keyPath 更新缓存 */
 export function markTranslated (
-  cache: CacheData,
+  cache: Record<string, any>,
   lang: string,
   file: string,
   keyPath: string,
   originalValue: any
-): void {
-  if (!cache[lang]) cache[lang] = {}
-  if (!cache[lang][file]) cache[lang][file] = {}
-  cache[lang][file][keyPath] = String(originalValue)
+) {
+  cache[lang] ??= {}
+  cache[lang][file] ??= {}
+  cache[lang][file][keyPath] = originalValue
 }
 
-/** 递归收集所有 key 路径 */
-export function collectKeyPaths (obj: any, prefix = ''): string[] {
-  const paths: string[] = []
-  for (const key in obj) {
-    const full = prefix ? `${prefix}.${key}` : key
-    if (typeof obj[key] === 'object' && obj[key] !== null) {
-      paths.push(...collectKeyPaths(obj[key], full))
-    } else {
-      paths.push(full)
-    }
-  }
-  return paths
-}
-
-/** 根据缓存过滤未翻译字段 */
+/** 过滤出未翻译或变更的条目 */
 export function filterUntranslated (
-  obj: any,
-  cache: CacheData,
+  source: Record<string, any>,
+  cache: Record<string, any>,
   lang: string,
   file: string,
-  force = false,
-  prefix = ''
-): any {
-  if (force) return obj // 强制翻译全部
+  force = false
+): Record<string, any> {
+  if (force) return source
+  const result: Record<string, any> = {}
+  const cached = cache[lang]?.[file] ?? {}
 
-  const result: any = Array.isArray(obj) ? [] : {}
-  for (const key in obj) {
-    const full = prefix ? `${prefix}.${key}` : key
-    const value = obj[key]
-    if (typeof value === 'object' && value !== null) {
-      const nested = filterUntranslated(value, cache, lang, file, force, full)
-      if (Object.keys(nested).length > 0) result[key] = nested
-    } else if (shouldTranslate(cache, lang, file, full, value)) {
-      result[key] = value
+  for (const key of collectKeyPaths(source)) {
+    const current = key.split('.').reduce((a, k) => a?.[k], source)
+    if (cached[key] !== current) {
+      assignDeep(result, key.split('.'), current)
     }
   }
   return result
+}
+
+/** 深层赋值 */
+function assignDeep (obj: any, pathArr: string[], val: any) {
+  const key = pathArr.shift()!
+  if (!pathArr.length) {
+    obj[key] = val
+    return
+  }
+  obj[key] ??= {}
+  assignDeep(obj[key], pathArr, val)
 }

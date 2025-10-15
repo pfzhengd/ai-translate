@@ -10,9 +10,72 @@ import {
   filterUntranslated
 } from './cache'
 
-/**
- * 解析命令行参数
- */
+/** ---------- 日志模块（支持 pretty / json） ---------- */
+
+type LogMode = 'pretty' | 'json'
+
+interface LogRecord {
+  time: string
+  taskId?: string
+  step: string
+  status?: 'ok' | 'fail' | 'info'
+  attempt?: string
+  durationMs?: number
+  error?: string
+  extra?: Record<string, unknown>
+}
+
+function nowISO () {
+  return new Date().toISOString()
+}
+
+function createLogger (mode: LogMode) {
+  const print = (rec: LogRecord) => {
+    if (mode === 'json') {
+      console.log(JSON.stringify(rec))
+    } else {
+      const { time, taskId, step, status, attempt, durationMs, error } = rec
+      const badge = status === 'ok' ? '✅' : status === 'fail' ? '❌' : 'ℹ️'
+      const dur = durationMs != null ? ` | ${durationMs}ms` : ''
+      const att = attempt ? ` | attempt ${attempt}` : ''
+      const tid = taskId ? ` [${taskId}]` : ''
+      const err = error ? `\n   ↳ ${error}` : ''
+      console.log(`${badge} ${time}${tid} ${step}${att}${dur}${err}`)
+    }
+  }
+
+  return {
+    startTask: (taskId: string) =>
+      print({ time: nowISO(), taskId, step: 'start', status: 'info' }),
+    callAI: (taskId: string, attempt: string) =>
+      print({ time: nowISO(), taskId, step: 'ai.call', status: 'info', attempt }),
+    retryAI: (taskId: string, attempt: string, error: string) =>
+      print({ time: nowISO(), taskId, step: 'ai.retry', status: 'info', attempt, error }),
+    aiError: (taskId: string, error: string) =>
+      print({ time: nowISO(), taskId, step: 'ai.error', status: 'fail', error }),
+    skipTask: (taskId: string, reason = 'cache.hit') =>
+      print({ time: nowISO(), taskId, step: 'skip', status: 'info', extra: { reason } }),
+    writeOk: (taskId: string, durationMs: number, path: string) =>
+      print({ time: nowISO(), taskId, step: 'write', status: 'ok', durationMs, extra: { path } }),
+    success: (taskId: string, durationMs: number) =>
+      print({ time: nowISO(), taskId, step: 'success', status: 'ok', durationMs }),
+    parseError: (taskId: string, err: string) =>
+      print({ time: nowISO(), taskId, step: 'parse.error', status: 'fail', error: err }),
+    done: (taskId: string) =>
+      print({ time: nowISO(), taskId, step: 'done', status: 'info' }),
+    summary: (ok: number, fail: number, durationMs: number, extra?: Record<string, unknown>) =>
+      print({
+        time: nowISO(),
+        step: 'summary',
+        status: fail > 0 ? 'fail' : 'ok',
+        durationMs,
+        extra: { ok, fail, ...extra }
+      })
+  }
+}
+
+/** ---------- CLI 参数解析 ---------- */
+
 function parseArgs (args: string[]) {
   const params: Record<string, string | boolean> = {}
   for (const arg of args) {
@@ -32,9 +95,7 @@ function parseArgs (args: string[]) {
   return params
 }
 
-/**
- * 解析 AI 返回结果（带清理逻辑）
- */
+/** ---------- JSON 解析增强 ---------- */
 function parseJsonRobust (raw: string) {
   try {
     return JSON.parse(raw)
@@ -43,25 +104,39 @@ function parseJsonRobust (raw: string) {
   }
 }
 
-/**
- * 获取嵌套值（用于标记缓存）
- */
+/** ---------- 工具 ---------- */
 function getValueByPath (obj: any, keyPath: string) {
   return keyPath.split('.').reduce((acc, k) => acc?.[k], obj)
 }
 
-/**
- * 处理单个翻译任务
- */
-async function runTask (task: FileTask, cfg: any, cache: any) {
-  const { lang, file, pendingPath, targetPath, isNew } = task
-  console.log(`🟦 [${lang}] ${file} (${isNew ? '新增' : '替换'})`)
+/** ---------- 单任务执行 ---------- */
+async function runTask (
+  task: FileTask,
+  cfg: {
+    apiKey: string
+    apiUrl: string
+    model: string
+    timeoutMs: number
+    retry: number
+    dry: boolean
+    force: boolean
+    logger: ReturnType<typeof createLogger>
+  },
+  cache: any
+) {
+  const { lang, file, pendingPath, targetPath } = task
+  const taskId = `${lang}/${file}`
+  const { logger } = cfg
+  const t0 = Date.now()
+
+  logger.startTask(taskId)
 
   const sourceJson = readJsonFile(pendingPath)
   const filteredJson = filterUntranslated(sourceJson, cache, lang, file, cfg.force)
 
   if (Object.keys(filteredJson).length === 0) {
-    console.log('   🔁 无需翻译（缓存一致）\n')
+    logger.skipTask(taskId, 'cache.hit')
+    logger.done(taskId)
     return { ok: true }
   }
 
@@ -70,7 +145,7 @@ async function runTask (task: FileTask, cfg: any, cache: any) {
   let translated = ''
   for (let attempt = 1; attempt <= cfg.retry + 1; attempt++) {
     try {
-      console.log(`   ├── 调用 AI (尝试 ${attempt}/${cfg.retry + 1})`)
+      logger.callAI(taskId, `${attempt}/${cfg.retry + 1}`)
       translated = await callAI({
         apiKey: cfg.apiKey,
         apiUrl: cfg.apiUrl,
@@ -79,47 +154,50 @@ async function runTask (task: FileTask, cfg: any, cache: any) {
         timeoutMs: cfg.timeoutMs
       })
       break
-    } catch (err) {
-      console.warn(`   ⚠️ 调用失败: ${err}. 重试中...`)
-      // eslint-disable-next-line promise/param-names
-      await new Promise(r => setTimeout(r, attempt * 1000))
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      if (attempt <= cfg.retry) {
+        logger.retryAI(taskId, `${attempt}/${cfg.retry + 1}`, msg)
+        // eslint-disable-next-line promise/param-names
+        await new Promise(r => setTimeout(r, attempt * 1000))
+      } else {
+        logger.aiError(taskId, msg)
+      }
     }
   }
 
   if (!translated) {
-    console.error(`   ❌ 翻译失败: ${lang}/${file}`)
+    logger.done(taskId)
     return { ok: false }
   }
 
   try {
     const json = parseJsonRobust(translated)
+    const beforeWrite = Date.now()
     if (!cfg.dry) writeJsonFile(targetPath, json)
+    const writeCost = Date.now() - beforeWrite
 
-    // ✅ 翻译成功后更新缓存（记录原始英文值）
-    if (!cfg.force) {
-      const paths = collectKeyPaths(sourceJson)
-      for (const keyPath of paths) {
-        const value = getValueByPath(sourceJson, keyPath)
-        markTranslated(cache, lang, file, keyPath, value)
-      }
+    const allPaths = collectKeyPaths(sourceJson)
+    for (const pathKey of allPaths) {
+      const val = getValueByPath(sourceJson, pathKey)
+      markTranslated(cache, lang, file, pathKey, val)
     }
 
-    console.log(`   └── ✅ 写入成功: ${targetPath}\n`)
+    logger.writeOk(taskId, writeCost, targetPath)
+    logger.success(taskId, Date.now() - t0)
+    logger.done(taskId)
     return { ok: true }
   } catch (e: any) {
-    console.error(`   ❌ JSON 解析失败: ${lang}/${file}\n${translated}`)
-    console.error(e.message)
+    logger.parseError(taskId, e?.message || String(e))
+    logger.done(taskId)
     return { ok: false }
   }
 }
 
-/**
- * 主执行函数
- */
+/** ---------- 主流程 ---------- */
 export async function main () {
   const args = process.argv.slice(2)
 
-  // 处理帮助与版本命令
   if (args.includes('-v') || args.includes('--version')) return printVersion()
   if (args.includes('-h') || args.includes('--help')) return printHelp()
 
@@ -136,24 +214,28 @@ export async function main () {
   const model = (arg.model as string) || 'gpt-4o-mini'
   const concurrency = Number(arg.concurrency ?? 2)
   const retry = Number(arg.retry ?? 1)
-  const dry = Boolean(arg.dry ?? false)
-  const force = Boolean(arg.force ?? false)
+  const dry = arg.dry === true || String(arg.dry) === 'true'
+  const force = arg.force === true || String(arg.force) === 'true'
   const timeoutMs = Number(arg.timeout ?? 60000)
+  const logMode: LogMode = (arg.log as string) === 'json' ? 'json' : 'pretty'
 
   if (!apiKey) {
     console.error('❌ 缺少 OPENROUTER_API_KEY')
     process.exit(1)
   }
 
-  console.log('\n🚀 启动翻译任务...')
-  console.log(`🌍 API: ${apiUrl}`)
-  console.log(`🔑 模型: ${model}`)
-  console.log(`🧵 并发: ${concurrency}`)
-  console.log(`🔁 重试: ${retry}`)
-  console.log(`📝 Dry-Run: ${dry ? '开启' : '关闭'}`)
-  console.log(`💥 强制翻译: ${force ? '开启（忽略缓存）' : '关闭'}\n`)
+  const logger = createLogger(logMode)
 
-  // 加载或重置缓存
+  if (logMode === 'pretty') {
+    console.log('\n🚀 启动翻译任务...')
+    console.log(`🌍 API: ${apiUrl}`)
+    console.log(`🔑 模型: ${model}`)
+    console.log(`🧵 并发: ${concurrency}`)
+    console.log(`🔁 重试: ${retry}`)
+    console.log(`📝 Dry-Run: ${dry ? '开启' : '关闭'}`)
+    console.log(`💥 强制翻译: ${force ? '开启（忽略缓存判断）' : '关闭'}\n`)
+  }
+
   const cache = force ? {} : loadCache()
   const tasks = buildFileTasks()
   const start = Date.now()
@@ -165,21 +247,34 @@ export async function main () {
     while (queue.length) {
       const task = queue.shift()
       if (!task) break
-      const result = await runTask(task, { apiKey, apiUrl, model, timeoutMs, retry, dry, force }, cache)
+      const result = await runTask(
+        task,
+        { apiKey, apiUrl, model, timeoutMs, retry, dry, force, logger },
+        cache
+      )
       result.ok ? ok++ : fail++
     }
   })
 
   await Promise.all(workers)
-  if (!force) saveCache(cache)
+  saveCache(cache)
 
-  const used = ((Date.now() - start) / 1000).toFixed(1)
-  console.log(`\n✅ 完成: 成功 ${ok}, 失败 ${fail}, 耗时 ${used}s`)
+  const used = Date.now() - start
+  logger.summary(ok, fail, used, {
+    apiUrl,
+    model,
+    concurrency,
+    retry,
+    dry,
+    force,
+    tasks: tasks.length
+  })
+
+  if (logMode === 'pretty') {
+    console.log(`\n✅ 成功: ${ok} | ❌ 失败: ${fail} | ⏱️ 耗时: ${(used / 1000).toFixed(1)}s`)
+  }
 }
 
-/**
- * 命令行直接执行
- */
 if (process.env.NODE_ENV !== 'test') {
   main().catch(e => {
     console.error('💥 程序运行出错:')
