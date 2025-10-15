@@ -2,8 +2,18 @@ import { callAI, cleanAIResponse } from './ai-request'
 import { getPrompt } from './prompt'
 import { buildFileTasks, readJsonFile, writeJsonFile, FileTask } from './io-handler'
 import { printHelp, printVersion } from './cli'
+import {
+  loadCache,
+  saveCache,
+  collectKeyPaths,
+  markTranslated,
+  filterUntranslated
+} from './cache'
 
-function parseArgs (args) {
+/**
+ * 解析命令行参数
+ */
+function parseArgs (args: string[]) {
   const params: Record<string, string | boolean> = {}
   for (const arg of args) {
     if (!arg.startsWith('--')) continue
@@ -22,6 +32,9 @@ function parseArgs (args) {
   return params
 }
 
+/**
+ * 解析 AI 返回结果（带清理逻辑）
+ */
 function parseJsonRobust (raw: string) {
   try {
     return JSON.parse(raw)
@@ -30,11 +43,29 @@ function parseJsonRobust (raw: string) {
   }
 }
 
-async function runTask (task: FileTask, cfg: any) {
+/**
+ * 获取嵌套值（用于标记缓存）
+ */
+function getValueByPath (obj: any, keyPath: string) {
+  return keyPath.split('.').reduce((acc, k) => acc?.[k], obj)
+}
+
+/**
+ * 处理单个翻译任务
+ */
+async function runTask (task: FileTask, cfg: any, cache: any) {
   const { lang, file, pendingPath, targetPath, isNew } = task
   console.log(`🟦 [${lang}] ${file} (${isNew ? '新增' : '替换'})`)
+
   const sourceJson = readJsonFile(pendingPath)
-  const prompt = getPrompt(JSON.stringify(sourceJson, null, 2), lang)
+  const filteredJson = filterUntranslated(sourceJson, cache, lang, file, cfg.force)
+
+  if (Object.keys(filteredJson).length === 0) {
+    console.log('   🔁 无需翻译（缓存一致）\n')
+    return { ok: true }
+  }
+
+  const prompt = getPrompt(JSON.stringify(filteredJson, null, 2), lang)
 
   let translated = ''
   for (let attempt = 1; attempt <= cfg.retry + 1; attempt++) {
@@ -63,6 +94,16 @@ async function runTask (task: FileTask, cfg: any) {
   try {
     const json = parseJsonRobust(translated)
     if (!cfg.dry) writeJsonFile(targetPath, json)
+
+    // ✅ 翻译成功后更新缓存（记录原始英文值）
+    if (!cfg.force) {
+      const paths = collectKeyPaths(sourceJson)
+      for (const keyPath of paths) {
+        const value = getValueByPath(sourceJson, keyPath)
+        markTranslated(cache, lang, file, keyPath, value)
+      }
+    }
+
     console.log(`   └── ✅ 写入成功: ${targetPath}\n`)
     return { ok: true }
   } catch (e: any) {
@@ -72,17 +113,15 @@ async function runTask (task: FileTask, cfg: any) {
   }
 }
 
+/**
+ * 主执行函数
+ */
 export async function main () {
   const args = process.argv.slice(2)
 
-  if (args.includes('-v') || args.includes('--version')) {
-    printVersion()
-    return
-  }
-
-  if (args.includes('-h') || args.includes('--help')) {
-    return printHelp()
-  }
+  // 处理帮助与版本命令
+  if (args.includes('-v') || args.includes('--version')) return printVersion()
+  if (args.includes('-h') || args.includes('--help')) return printHelp()
 
   const arg = parseArgs(args)
   const apiKey =
@@ -98,6 +137,7 @@ export async function main () {
   const concurrency = Number(arg.concurrency ?? 2)
   const retry = Number(arg.retry ?? 1)
   const dry = Boolean(arg.dry ?? false)
+  const force = Boolean(arg.force ?? false)
   const timeoutMs = Number(arg.timeout ?? 60000)
 
   if (!apiKey) {
@@ -110,8 +150,11 @@ export async function main () {
   console.log(`🔑 模型: ${model}`)
   console.log(`🧵 并发: ${concurrency}`)
   console.log(`🔁 重试: ${retry}`)
-  console.log(`📝 Dry-Run: ${dry ? '开启' : '关闭'}\n`)
+  console.log(`📝 Dry-Run: ${dry ? '开启' : '关闭'}`)
+  console.log(`💥 强制翻译: ${force ? '开启（忽略缓存）' : '关闭'}\n`)
 
+  // 加载或重置缓存
+  const cache = force ? {} : loadCache()
   const tasks = buildFileTasks()
   const start = Date.now()
   let ok = 0
@@ -122,17 +165,21 @@ export async function main () {
     while (queue.length) {
       const task = queue.shift()
       if (!task) break
-      const result = await runTask(task, { apiKey, apiUrl, model, timeoutMs, retry, dry })
-      if (result.ok) ok++
-      else fail++
+      const result = await runTask(task, { apiKey, apiUrl, model, timeoutMs, retry, dry, force }, cache)
+      result.ok ? ok++ : fail++
     }
   })
 
   await Promise.all(workers)
+  if (!force) saveCache(cache)
+
   const used = ((Date.now() - start) / 1000).toFixed(1)
   console.log(`\n✅ 完成: 成功 ${ok}, 失败 ${fail}, 耗时 ${used}s`)
 }
 
+/**
+ * 命令行直接执行
+ */
 if (process.env.NODE_ENV !== 'test') {
   main().catch(e => {
     console.error('💥 程序运行出错:')
