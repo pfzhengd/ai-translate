@@ -1,6 +1,6 @@
 {
   "name": "@jupiterjs/translate",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "ai翻译",
   "main": "lib/main/index.js",
   "types": "lib/types/index.d.ts",
