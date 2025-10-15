@@ -1,3 +1,16 @@
+## [0.4.1](https://github.com/pfzhengd/ai-translate/compare/v0.4.0...v0.4.1) (2025-10-15)
+
+
+
+# [0.4.0](https://github.com/pfzhengd/ai-translate/compare/v0.3.1...v0.4.0) (2025-10-15)
+
+
+### Features
+
+* 增加缓存记录功能 ([fcf876a](https://github.com/pfzhengd/ai-translate/commit/fcf876a266a6bec3b28f39a08cb5de540ce3f452))
+
+
+
 ## [0.3.1](https://github.com/pfzhengd/ai-translate/compare/v0.3.0...v0.3.1) (2025-10-10)
 
 
